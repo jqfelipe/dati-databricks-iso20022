@@ -20,7 +20,9 @@ from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
 from azure.storage.filedatalake import DataLakeServiceClient
 from databricks import sql
+from databricks.sdk import WorkspaceClient
 from databricks.sdk.core import Config, oauth_service_principal
+from databricks.sdk.errors import DatabricksError
 from defusedxml import ElementTree as DefusedET
 from flask import Flask, jsonify, render_template_string, request
 from lxml import etree
@@ -146,12 +148,33 @@ def read_abfss_file(blob_uri: str) -> bytes:
 def read_volume_file(file_name: str) -> bytes:
     input_volume_path = os.environ["INPUT_VOLUME_PATH"]
     file_path = Path(input_volume_path) / validate_file_name(file_name)
+    if os.getenv("DATABRICKS_APP_PORT"):
+        try:
+            response = WorkspaceClient().files.download(str(file_path))
+            if response.content_length and response.content_length > MAX_FILE_SIZE_BYTES:
+                raise ValidationError(f"El archivo supera el límite de {MAX_FILE_SIZE_BYTES} bytes.")
+            if response.contents is None:
+                raise RuntimeError("La descarga del volumen no incluyó contenido.")
+            try:
+                content = response.contents.read(MAX_FILE_SIZE_BYTES + 1)
+            finally:
+                response.contents.close()
+            if len(content) > MAX_FILE_SIZE_BYTES:
+                raise ValidationError(f"El archivo supera el límite de {MAX_FILE_SIZE_BYTES} bytes.")
+            return content
+        except DatabricksError as error:
+            raise RuntimeError(
+                f"No se pudo descargar el archivo desde el volumen de entrada: {error}"
+            ) from error
+
     try:
         if file_path.stat().st_size > MAX_FILE_SIZE_BYTES:
             raise ValidationError(f"El archivo supera el límite de {MAX_FILE_SIZE_BYTES} bytes.")
         return file_path.read_bytes()
     except FileNotFoundError as error:
-        raise RuntimeError(f"No existe el archivo '{file_name}' en el volumen de entrada.") from error
+        raise RuntimeError(
+            f"No existe el archivo '{file_name}' en el volumen de entrada: {file_path}."
+        ) from error
     except OSError as error:
         raise RuntimeError(f"No se pudo leer el archivo desde el volumen de entrada: {error}") from error
 
