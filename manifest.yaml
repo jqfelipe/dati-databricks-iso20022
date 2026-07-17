@@ -1,0 +1,3 @@
+version: 1
+name: "ISO-20022-Validator"
+description: "Validator for ISO 20022 messages."
