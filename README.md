@@ -48,10 +48,10 @@ La aplicación crea la tabla indicada si no existe. La identidad asociada al tok
 debe tener permisos `USE CATALOG`, `USE SCHEMA`, `CREATE TABLE` e `INSERT`
 sobre el destino.
 
-La identidad que ejecuta la aplicación debe tener el rol **Storage Blob Data Reader**
-sobre la cuenta de almacenamiento o el contenedor de entrada. Localmente se usa la
-sesión de Azure CLI mediante `DefaultAzureCredential`; en Databricks Apps se usa la
-identidad de un service principal de Azure configurada mediante secretos.
+Localmente, la aplicación obtiene el archivo ABFSS mediante la sesión de Azure CLI
+con `DefaultAzureCredential`. En Databricks Apps, los archivos se leen desde un
+volumen de Unity Catalog asociado a la external location, sin credenciales Azure
+ni secretos en la App.
 
 ## Ejecución local
 
@@ -76,12 +76,10 @@ No configure `DATABRICKS_TOKEN` en la App.
 
 1. En **Databricks Apps**, abra `iso20022-validator` y agregue el SQL Warehouse
    `ArchivosIso` con la clave `sql-warehouse` y permiso **Can use**.
-2. Agregue tres recursos de tipo **Secret** con las claves `azure-tenant-id`,
-   `azure-client-id` y `azure-client-secret`. Sus valores corresponden a un
-   service principal de Azure que tenga **Storage Blob Data Reader** en el
-   contenedor `archivos`.
-3. Conceda a la identidad de la App `USE CATALOG`, `USE SCHEMA` y
-   `CREATE TABLE` sobre `procesamiento_archivos.default`.
+2. Agregue el volumen `procesamiento_archivos.default.iso20022_inbound` con la
+   clave `input-volume` y permiso **Can read**.
+3. Conceda a la identidad de la App `USE CATALOG`, `USE SCHEMA`,
+   `CREATE TABLE` y `READ VOLUME` sobre `procesamiento_archivos.default`.
 4. Sincronice y despliegue el código:
 
 ```powershell

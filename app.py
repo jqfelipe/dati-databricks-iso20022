@@ -143,6 +143,29 @@ def read_abfss_file(blob_uri: str) -> bytes:
         raise RuntimeError(f"No se pudo obtener el archivo de ADLS Gen2: {error}") from error
 
 
+def read_volume_file(file_name: str) -> bytes:
+    input_volume_path = os.environ["INPUT_VOLUME_PATH"]
+    file_path = Path(input_volume_path) / validate_file_name(file_name)
+    try:
+        if file_path.stat().st_size > MAX_FILE_SIZE_BYTES:
+            raise ValidationError(f"El archivo supera el límite de {MAX_FILE_SIZE_BYTES} bytes.")
+        return file_path.read_bytes()
+    except FileNotFoundError as error:
+        raise RuntimeError(f"No existe el archivo '{file_name}' en el volumen de entrada.") from error
+    except OSError as error:
+        raise RuntimeError(f"No se pudo leer el archivo desde el volumen de entrada: {error}") from error
+
+
+def read_source_file(file_name: str, blob_uri: str) -> bytes:
+    if os.getenv("INPUT_VOLUME_PATH"):
+        return read_volume_file(file_name)
+    if os.getenv("DATABRICKS_APP_PORT"):
+        raise RuntimeError(
+            "INPUT_VOLUME_PATH es obligatorio para leer archivos en Databricks Apps."
+        )
+    return read_abfss_file(blob_uri)
+
+
 @lru_cache(maxsize=32)
 def load_xsd_schema(namespace: str) -> etree.XMLSchema | None:
     xsd_directory = os.getenv("ISO20022_XSD_DIR")
@@ -343,7 +366,7 @@ def validate_file():
         blob_uri = build_blob_uri(file_name)
         metadata = create_metadata(
             file_name,
-            read_abfss_file(blob_uri),
+            read_source_file(file_name, blob_uri),
             blob_uri,
             request.form.get("client_id", ""),
             request.form.get("channel", ""),

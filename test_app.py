@@ -2,7 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from app import app, build_blob_uri, create_metadata
+from app import app, build_blob_uri, create_metadata, read_source_file
 
 
 VALID_XML = b"""<?xml version="1.0" encoding="UTF-8"?>
@@ -30,7 +30,7 @@ class Iso20022ValidationTests(unittest.TestCase):
         with patch.dict(
             os.environ,
             {"ABFSS_BASE_URI": "abfss://inbox@storage.dfs.core.windows.net/inbound/"},
-        ), patch("app.read_abfss_file", return_value=b"<Document><Message /></Document>"):
+        ), patch("app.read_source_file", return_value=b"<Document><Message /></Document>"):
             response = self.client.post(
                 "/api/files/validate",
                 data={"file_name": "payment.xml", "client_id": "CC-123", "channel": "API"},
@@ -50,6 +50,11 @@ class Iso20022ValidationTests(unittest.TestCase):
             uri,
             "abfss://inbox@storage.dfs.core.windows.net/inbound/payment.xml",
         )
+
+    def test_requires_volume_path_in_databricks_apps(self):
+        with patch.dict(os.environ, {"DATABRICKS_APP_PORT": "8000"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "INPUT_VOLUME_PATH"):
+                read_source_file("payment.xml", "abfss://inbox@storage.dfs.core.windows.net/payment.xml")
 
 
 if __name__ == "__main__":
