@@ -20,6 +20,7 @@ from azure.core.exceptions import AzureError
 from azure.identity import DefaultAzureCredential
 from azure.storage.filedatalake import DataLakeServiceClient
 from databricks import sql
+from databricks.sdk.core import Config, oauth_service_principal
 from defusedxml import ElementTree as DefusedET
 from flask import Flask, jsonify, render_template_string, request
 from lxml import etree
@@ -282,14 +283,36 @@ def persist_metadata(metadata: FileMetadata) -> bool:
         INSERT INTO {table_name} VALUES
         (?, ?, ?, ?, CAST(? AS TIMESTAMP), ?, ?, ?, ?, CAST(? AS TIMESTAMP), ?, ?, ?)
     """
-    access_token = os.getenv("DATABRICKS_TOKEN")
-    if not access_token:
-        raise RuntimeError("DATABRICKS_TOKEN es obligatorio para persistir metadatos.")
+    databricks_host = os.environ["DATABRICKS_HOST"]
     connection_kwargs: dict[str, Any] = {
-        "server_hostname": os.environ["DATABRICKS_HOST"].replace("https://", ""),
+        "server_hostname": databricks_host.replace("https://", ""),
         "http_path": f"/sql/1.0/warehouses/{warehouse_id}",
-        "access_token": access_token,
     }
+    access_token = os.getenv("DATABRICKS_TOKEN")
+    if access_token:
+        connection_kwargs["access_token"] = access_token
+    else:
+        missing_oauth_settings = [
+            name
+            for name in ("DATABRICKS_CLIENT_ID", "DATABRICKS_CLIENT_SECRET")
+            if not os.getenv(name)
+        ]
+        if missing_oauth_settings:
+            raise RuntimeError(
+                "Se requiere DATABRICKS_TOKEN para ejecución local o las credenciales OAuth "
+                f"de Databricks Apps: {', '.join(missing_oauth_settings)}."
+            )
+
+        def app_credentials_provider():
+            return oauth_service_principal(
+                Config(
+                    host=databricks_host,
+                    client_id=os.environ["DATABRICKS_CLIENT_ID"],
+                    client_secret=os.environ["DATABRICKS_CLIENT_SECRET"],
+                )
+            )
+
+        connection_kwargs["credentials_provider"] = app_credentials_provider
 
     with sql.connect(**connection_kwargs) as connection:
         with connection.cursor() as cursor:
@@ -344,4 +367,7 @@ def validate_file():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))
+    app.run(
+        host="0.0.0.0",
+        port=int(os.getenv("DATABRICKS_APP_PORT", os.getenv("PORT", "8000"))),
+    )

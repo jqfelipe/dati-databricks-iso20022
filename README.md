@@ -39,7 +39,7 @@ Configure estas variables de entorno/secrets en la Databricks App:
 | `DATABRICKS_HOST` | Sí, para persistir | URL del workspace de Databricks. |
 | `DATABRICKS_SQL_WAREHOUSE_ID` | Sí, para persistir | Identificador del SQL Warehouse. |
 | `FILE_METADATA_TABLE` | Sí, para persistir | Tabla Delta destino, por ejemplo `procesamiento_archivos.default.iso20022_file_metadata`. |
-| `DATABRICKS_TOKEN` | Sí, para persistir | Token de un service principal o identidad con acceso al SQL Warehouse. Guárdelo como secret de la App. |
+| `DATABRICKS_TOKEN` | Solo local | PAT de Databricks para desarrollo local. No se usa en Databricks Apps. |
 | `ABFSS_BASE_URI` | Sí | Directorio de entrada en ADLS Gen2, por ejemplo `abfss://archivos@pruebasdatabricksv104.dfs.core.windows.net/inbound/`. |
 | `ISO20022_XSD_DIR` | No | Directorio con los XSD oficiales ISO 20022 admitidos. |
 | `MAX_FILE_SIZE_BYTES` | No | Límite de tamaño en bytes. |
@@ -51,12 +51,12 @@ sobre el destino.
 La identidad que ejecuta la aplicación debe tener el rol **Storage Blob Data Reader**
 sobre la cuenta de almacenamiento o el contenedor de entrada. Localmente se usa la
 sesión de Azure CLI mediante `DefaultAzureCredential`; en Databricks Apps se usa la
-identidad administrada configurada para la App.
+identidad de un service principal de Azure configurada mediante secretos.
 
 ## Ejecución local
 
 ```powershell
-python -m pip install -r requeriments.txt
+python -m pip install -r requirements.txt
 $env:DATABRICKS_HOST = "https://adb-<workspace>.azuredatabricks.net"
 $env:DATABRICKS_TOKEN = "<token>" # Solo desarrollo local
 $env:DATABRICKS_SQL_WAREHOUSE_ID = "<warehouse-id>"
@@ -68,3 +68,25 @@ python -m flask --app app.py run
 Abra `http://127.0.0.1:5000`, indique el nombre del XML y sus metadatos. El endpoint
 `POST /api/files/validate` recibe `file_name`, `client_id` y `channel` como
 `multipart/form-data`; el archivo se descarga de `ABFSS_BASE_URI`.
+
+## Despliegue como Databricks App
+
+La App `iso20022-validator` usa su propia identidad OAuth para Databricks SQL.
+No configure `DATABRICKS_TOKEN` en la App.
+
+1. En **Databricks Apps**, abra `iso20022-validator` y agregue el SQL Warehouse
+   `ArchivosIso` con la clave `sql-warehouse` y permiso **Can use**.
+2. Agregue tres recursos de tipo **Secret** con las claves `azure-tenant-id`,
+   `azure-client-id` y `azure-client-secret`. Sus valores corresponden a un
+   service principal de Azure que tenga **Storage Blob Data Reader** en el
+   contenedor `archivos`.
+3. Conceda a la identidad de la App `USE CATALOG`, `USE SCHEMA` y
+   `CREATE TABLE` sobre `procesamiento_archivos.default`.
+4. Sincronice y despliegue el código:
+
+```powershell
+databricks sync . "/Workspace/Users/<tu-usuario>/iso20022-validator" --profile adb-DATI
+databricks apps deploy iso20022-validator `
+  --source-code-path "/Workspace/Users/<tu-usuario>/iso20022-validator" `
+  --profile adb-DATI
+```

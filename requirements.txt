@@ -1,6 +1,7 @@
 azure-identity>=1.17,<2
 azure-storage-file-datalake>=12.16,<13
 databricks-sql-connector>=3.7,<5
+databricks-sdk>=0.40,<1
 defusedxml>=0.7,<1
 Flask>=3.0,<4
 lxml>=5.0,<7

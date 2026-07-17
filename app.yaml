@@ -1,10 +1,17 @@
 command: [
-  "flask",
-  "--app",
+  "python",
   "app.py",
-  "run",
-  "--host",
-  "0.0.0.0",
-  "--port",
-  "8000"
 ]
+env:
+  - name: "DATABRICKS_SQL_WAREHOUSE_ID"
+    valueFrom: "sql-warehouse"
+  - name: "FILE_METADATA_TABLE"
+    value: "procesamiento_archivos.default.iso20022_file_metadata"
+  - name: "ABFSS_BASE_URI"
+    value: "abfss://archivos@pruebasdatabricksv104.dfs.core.windows.net/inbound/"
+  - name: "AZURE_TENANT_ID"
+    valueFrom: "azure-tenant-id"
+  - name: "AZURE_CLIENT_ID"
+    valueFrom: "azure-client-id"
+  - name: "AZURE_CLIENT_SECRET"
+    valueFrom: "azure-client-secret"
