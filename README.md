@@ -45,8 +45,8 @@ Configure estas variables de entorno/secrets en la Databricks App:
 | `MAX_FILE_SIZE_BYTES` | No | Límite de tamaño en bytes. |
 
 La aplicación crea la tabla indicada si no existe. La identidad asociada al token
-debe tener permisos `USE CATALOG`, `USE SCHEMA`, `CREATE TABLE` e `INSERT`
-sobre el destino.
+debe tener permisos `USE CATALOG`, `USE SCHEMA` y `CREATE TABLE` sobre el
+esquema, y `SELECT` y `MODIFY` sobre la tabla destino.
 
 Localmente, la aplicación obtiene el archivo ABFSS mediante la sesión de Azure CLI
 con `DefaultAzureCredential`. En Databricks Apps, los archivos se leen desde un
@@ -79,7 +79,8 @@ No configure `DATABRICKS_TOKEN` en la App.
 2. Agregue el volumen `procesamiento_archivos.default.iso20022_inbound` con la
    clave `input-volume` y permiso **Can read**.
 3. Conceda a la identidad de la App `USE CATALOG`, `USE SCHEMA`,
-   `CREATE TABLE` y `READ VOLUME` sobre `procesamiento_archivos.default`.
+   `CREATE TABLE`, `SELECT`, `MODIFY` y `READ VOLUME` sobre
+   `procesamiento_archivos.default`.
 4. Sincronice y despliegue el código:
 
 ```powershell
@@ -87,4 +88,77 @@ databricks sync . "/Workspace/Users/<tu-usuario>/iso20022-validator" --profile a
 databricks apps deploy iso20022-validator `
   --source-code-path "/Workspace/Users/<tu-usuario>/iso20022-validator" `
   --profile adb-DATI
+```
+
+### Configuración reproducible con Databricks CLI
+
+Los siguientes comandos replican la configuración de recursos y permisos desde
+PowerShell. Reemplace los valores entre `<...>` para el ambiente destino. El
+perfil debe apuntar al workspace de ese ambiente.
+
+```powershell
+$profile = "<perfil-databricks>"
+$appName = "iso20022-validator"
+$warehouseName = "ArchivosIso"
+$catalog = "procesamiento_archivos"
+$schema = "default"
+$table = "$catalog.$schema.iso20022_file_metadata"
+$volume = "$catalog.$schema.iso20022_inbound"
+
+# Identificar el ID del warehouse y la identidad de servicio de la App.
+$warehouse = databricks warehouses list --output json --profile $profile |
+  ConvertFrom-Json | Where-Object name -eq $warehouseName
+if (-not $warehouse) { throw "No se encontró el SQL Warehouse '$warehouseName'." }
+
+$app = databricks apps get $appName --output json --profile $profile |
+  ConvertFrom-Json
+$appServicePrincipal = $app.service_principal_client_id
+if (-not $appServicePrincipal) { throw "No se encontró la identidad de servicio de la App." }
+
+# Asociar el warehouse con la clave que app.yaml referencia mediante valueFrom.
+# Se preservan los recursos y la configuración de despliegue ya definidos.
+$resources = @($app.resources | Where-Object name -ne "sql-warehouse") + @(
+  @{
+    name = "sql-warehouse"
+    sql_warehouse = @{
+      id = $warehouse.id
+      permission = "CAN_USE"
+    }
+  }
+)
+$appUpdate = @{
+  resources = $resources
+}
+if ($app.description) { $appUpdate.description = $app.description }
+if ($app.default_source_code_path) {
+  $appUpdate.default_source_code_path = $app.default_source_code_path
+}
+if ($app.git_repository) {
+  $appUpdate.git_repository = @{
+    provider = $app.git_repository.provider
+    url = $app.git_repository.url
+  }
+}
+$appUpdate = $appUpdate | ConvertTo-Json -Depth 5 -Compress
+databricks apps update $appName --json $appUpdate --profile $profile
+
+# Permitir que la App cree la tabla y use el volumen.
+databricks grants update catalog $catalog --json "{`"changes`":[{`"principal`":`"$appServicePrincipal`",`"add`":[`"USE_CATALOG`"]}]}" --profile $profile
+databricks grants update schema "$catalog.$schema" --json "{`"changes`":[{`"principal`":`"$appServicePrincipal`",`"add`":[`"USE_SCHEMA`",`"CREATE_TABLE`"]}]}" --profile $profile
+databricks grants update volume $volume --json "{`"changes`":[{`"principal`":`"$appServicePrincipal`",`"add`":[`"READ_VOLUME`"]}]}" --profile $profile
+
+# Si la tabla ya existe, permitir la comprobación y la inserción de metadatos.
+databricks grants update table $table --json "{`"changes`":[{`"principal`":`"$appServicePrincipal`",`"add`":[`"SELECT`",`"MODIFY`"]}]}" --profile $profile
+
+# Crear un nuevo despliegue para que el runtime reciba DATABRICKS_SQL_WAREHOUSE_ID.
+databricks apps deploy $appName `
+  --source-code-path "/Workspace/Users/<tu-usuario>/$appName" `
+  --profile $profile
+```
+
+Verifique los recursos y permisos aplicados:
+
+```powershell
+databricks apps get $appName --output json --profile $profile
+databricks grants get table $table --max-results 0 --output json --profile $profile
 ```
